@@ -10,23 +10,55 @@ export default function WebAuthnGuard({ children }) {
         throw new Error('WebAuthn is not supported in this browser.');
       }
 
-      const publicKey = {
-        challenge: new Uint8Array(32),
-        timeout: 60000,
-        userVerification: 'required',
-      };
+      const storedCredentialId = localStorage.getItem('adr_credential_id');
 
-      const credential = await navigator.credentials.get({ publicKey });
-      if (credential) {
+      if (!storedCredentialId) {
+        // Registration Phase (First Time Setup)
+        const publicKey = {
+          challenge: new Uint8Array(32),
+          rp: { name: "Antigravity Direct Remote", id: window.location.hostname },
+          user: {
+            id: new Uint8Array(16),
+            name: "commander@adr.local",
+            displayName: "ADR Commander"
+          },
+          pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+          authenticatorSelection: { userVerification: "required" },
+          timeout: 60000,
+          attestation: "none"
+        };
+
+        const credential = await navigator.credentials.create({ publicKey });
+        // Store the raw ID to use for future authentication
+        const credentialIdBase64 = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
+        localStorage.setItem('adr_credential_id', credentialIdBase64);
+
         setIsAuthenticated(true);
         setError('');
         resetInactivityTimeout();
+      } else {
+        // Authentication Phase (Returning User)
+        const credentialIdBytes = Uint8Array.from(atob(storedCredentialId), c => c.charCodeAt(0));
+
+        const publicKey = {
+          challenge: new Uint8Array(32),
+          allowCredentials: [{
+            id: credentialIdBytes,
+            type: 'public-key',
+          }],
+          timeout: 60000,
+          userVerification: 'required',
+        };
+
+        const credential = await navigator.credentials.get({ publicKey });
+        if (credential) {
+          setIsAuthenticated(true);
+          setError('');
+          resetInactivityTimeout();
+        }
       }
     } catch (err) {
-      // For development purposes, allow fallback or show error
       setError(err.message || 'Authentication failed');
-      // Uncomment to bypass in dev:
-      // setIsAuthenticated(true);
     }
   };
 
